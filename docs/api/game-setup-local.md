@@ -41,15 +41,7 @@ GameProfile은 테스트 입력이며 클라이언트 값으로 운영 상태를
 JDK 17에서 저장소 루트의 gradlew.bat :app:testDebugUnitTest :app:assembleDebug 실행.
 
 
-## 독립 테스트 화면
+## 앱 화면 확인
 
-debug 소스셋의 com.finpop.app.debug.game.GameSetupTestActivity가 테스트 진입점이다.
-기존 MainActivity·로그인·feature/game은 수정하지 않았다. release에는 테스트 Activity·화면·Manifest가 포함되지 않는다.
-debug 앱 설치 후 앱 목록의 “FinPOP 게임 테스트” 아이콘으로 실행한다.
-Android Studio의 Android App 실행 구성에서도 Launch를 Specified Activity로 선택해 위 Activity를 지정할 수 있다.
-
-게임 생성 → 선공 결정 → 이동 주사위 → 저장 상태 다시 조회 순서로 확인한다.
-일반 모드는 무작위 추첨이다. AI 선공일 때는 사용자 이동이 차단된다.
-고정 시나리오는 사용자 선공(6:1)과 선택한 이동 값(1~6)을 재현한다. 서버 난수가 아닌 테스트 입력이다.
-화면 재생성 시 상태가 초기화된다. 테스트 초기화 버튼은 저장소 자체를 새로 만든다.
-첫 이동만 검증하므로 출발 보상은 0G가 정상이다. 한 바퀴 통과는 규칙 테스트에서 별도 검증한다.
+임시 debug 테스트 화면은 삭제했습니다. 일반 app을 실행하면 시작 화면 → Google 로그인 화면 → 팀원 보드 화면으로 이어집니다.
+서버 문제·답변·구매·차례 종료는 실제 로그인 세션을 사용합니다. 로컬 규칙 검증은 단위 테스트로 실행합니다.

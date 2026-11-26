@@ -24,7 +24,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
@@ -39,7 +38,7 @@ import com.finpop.app.feature.game.GameBoardUiState
 import com.finpop.app.feature.game.MainGameBoardScreen
 import com.finpop.app.feature.game.QuizTile
 import com.finpop.app.feature.game.quizTile
-import kotlinx.coroutines.delay
+import com.finpop.app.data.game.remote.ServerChoice
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -54,43 +53,39 @@ private val Green = Color(0xFF047857)
 private val Gold = Color(0xFFFFB51B)
 private val Corners = RoundedCornerShape(5.dp)
 
-private const val Question = "정기예금을 만기 전에 해지하면 일반적으로 어떻게 될까?"
-private val Answers = listOf(
+// Preview 전용 예시입니다. 실제 게임에서는 서버 상태를 전달합니다.
+private const val PreviewQuestion = "정기예금을 만기 전에 해지하면 일반적으로 어떻게 될까?"
+private val PreviewAnswers = listOf(
     "약정 이자보다 낮은 이자를 받는다",
     "약정 이자의 두 배를 받는다",
     "원금을 받을 수 없다",
     "다음 달에 자동으로 재가입된다",
 )
-private const val Hint = "예금 해지에는 만기 해지와 중도 해지가 있으며, 만기 해지 시 약정했던 이율과 기간에 따른 전체 이자가 지급됩니다. 중도 해지 시에는 약정한 금리보다 낮은 중도해지이율이 적용되어 이자 수익이 크게 줄어듭니다. 보통 가입 기간을 오래 채울수록 높은 비율의 중도해지 이율이 적용됩니다."
-private const val Explanation = "정기예금을 만기 전에 중도해지하면 원래 약정했던 정상 이율 대신 중도해지 이율(패널티 금리)이 적용되어 이자 수익이 대폭 감소합니다. 따라서 정기예금은 계획된 만기까지 유지하는 것이 가장 유리합니다."
+private const val PreviewHint = "예금 해지에는 만기 해지와 중도 해지가 있으며, 만기 해지 시 약정했던 이율과 기간에 따른 전체 이자가 지급됩니다. 중도 해지 시에는 약정한 금리보다 낮은 중도해지이율이 적용되어 이자 수익이 크게 줄어듭니다. 보통 가입 기간을 오래 채울수록 높은 비율의 중도해지 이율이 적용됩니다."
+private const val PreviewExplanation = "정기예금을 만기 전에 중도해지하면 원래 약정했던 정상 이율 대신 중도해지 이율(패널티 금리)이 적용되어 이자 수익이 대폭 감소합니다. 따라서 정기예금은 계획된 만기까지 유지하는 것이 가장 유리합니다."
 
 internal enum class QuizPage { Question, Correct, Incorrect }
 
 @Composable
 internal fun TileQuizPopup(
     tile: QuizTile,
+    card: TileQuizUiState,
     gold: Int,
     canAcquire: Boolean,
     collapsed: Boolean,
     onToggleCollapsed: () -> Unit,
     onAcquire: () -> Unit,
     onFinish: () -> Unit,
-    initialPage: QuizPage = QuizPage.Question,
+    onSubmit: (Int) -> Unit,
+    busy: Boolean = false,
 ) {
-    val inspecting = LocalInspectionMode.current
-    var page by rememberSaveable { mutableStateOf(initialPage) }
-    var selection by rememberSaveable { mutableIntStateOf(if (inspecting && initialPage == QuizPage.Question) 0 else -1) }
-    var seconds by rememberSaveable { mutableIntStateOf(20) }
-    BackHandler { if (collapsed) onToggleCollapsed() else onFinish() }
-
-    LaunchedEffect(page, inspecting) {
-        if (!inspecting && page == QuizPage.Question) {
-            while (seconds > 0) {
-                delay(1000)
-                seconds--
-            }
-            page = QuizPage.Incorrect
-        }
+    val price = card.purchasePrice ?: tile.price
+    val page = card.page
+    val seconds = card.secondsRemaining
+    var selection by rememberSaveable(card.attemptId) { mutableStateOf(card.selectedChoiceId) }
+    BackHandler {
+        if (collapsed || page == QuizPage.Question) onToggleCollapsed()
+        else if (!busy) onFinish()
     }
 
     val correct = page == QuizPage.Correct
@@ -98,7 +93,7 @@ internal fun TileQuizPopup(
     val balance = NumberFormat.getIntegerInstance(Locale.KOREA).format(gold)
     QuizTicket("금융 퀴즈", collapsed) {
             Column(Modifier.fillMaxWidth().background(Blue)) {
-                if (correct) {
+                if (correct || collapsed) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.End) {
                         QuizLabel(
@@ -118,12 +113,12 @@ internal fun TileQuizPopup(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 ) {
-                                    QuizLabel("STAGE 01", Ink, Color(0xFFDDE7FF))
+                                    QuizLabel("STAGE " + card.stage.toString().padStart(2, '0'), Ink, Color(0xFFDDE7FF))
                                     Text("FINANCIAL QUIZ CARD", color = Color.White,
                                         fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 10.sp)
                                 }
-                                QuizPage.Correct -> QuizLabel("STAGE 01 CLEAR", Color.White, Green)
-                                QuizPage.Incorrect -> QuizLabel("⊗ STAGE 01 // 오답", Red, Color(0xFFFFDFDA))
+                                QuizPage.Correct -> QuizLabel("STAGE " + card.stage.toString().padStart(2, '0') + " CLEAR", Color.White, Green)
+                                QuizPage.Incorrect -> QuizLabel("⊗ STAGE " + card.stage.toString().padStart(2, '0') + " // 오답", Red, Color(0xFFFFDFDA))
                             }
                             if (page == QuizPage.Question) {
                                 QuizLabel("◴ 00:%02d".format(Locale.ROOT, seconds), Ink, Gold, Modifier.clip(CircleShape))
@@ -158,9 +153,9 @@ internal fun TileQuizPopup(
                 if (failed) {
                     Column(Modifier.fillMaxWidth().background(Color(0xFFFFDEDA), Corners)
                         .border(1.dp, Color(0xFFF3ABA5), Corners).padding(10.dp)) {
-                        Text(if (seconds == 0) "시간이 초과됐어요!" else "⊗  아쉬워요! 오답입니다",
+                        Text(if (card.timedOut) "시간이 초과됐어요!" else "⊗  아쉬워요! 오답입니다",
                             color = Red, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
-                        Body(if (seconds == 0) "제한 시간 안에 답변을 제출하지 못했습니다." else "선택한 답변이 맞지 않아 타일을 획득하지 못했습니다.")
+                        Body(if (card.timedOut) "제한 시간 안에 답변을 제출하지 못했습니다." else "선택한 답변이 맞지 않아 타일을 획득하지 못했습니다.")
                     }
                 }
                 Column(Modifier.fillMaxWidth().background(Tint, Corners).border(1.dp, Line, Corners).padding(10.dp),
@@ -173,28 +168,33 @@ internal fun TileQuizPopup(
                     } else if (correct) {
                         QuizLabel("✓ 정답", Color.White, Blue)
                     }
-                    Text("Q. $Question", color = Ink, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, lineHeight = 19.sp)
+                    Text("Q. " + card.question, color = Ink, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, lineHeight = 19.sp)
                     if (page == QuizPage.Question) {
-                        Body(Hint)
+                        card.hint?.takeIf { it.isNotBlank() }?.let { Body(it) }
                     } else {
-                        AnswerRow(0, selected = true, onSelect = null, showCorrectLabel = failed)
-                        if (correct) Box(Modifier.background(Paper, Corners).padding(8.dp)) { Body("해설 · $Explanation") }
+                        card.choices.firstOrNull { it.id == card.correctChoiceId }?.let {
+                            AnswerRow(it, selected = true, onSelect = null, showCorrectLabel = failed)
+                        }
+                        if (correct) Box(Modifier.background(Paper, Corners).padding(8.dp)) { Body("해설 · " + card.explanation.orEmpty()) }
                     }
                 }
 
                 when (page) {
                     QuizPage.Question -> {
                         Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            Answers.indices.forEach { index ->
-                                AnswerRow(index, selection == index, { selection = index })
+                            card.choices.forEach { choice ->
+                                AnswerRow(choice, selection == choice.id,
+                                    if (busy || seconds <= 0) null else ({ selection = choice.id }))
                             }
                         }
-                        QuizButton("정답 제출하기 (SUBMIT)", filled = true, enabled = selection >= 0) {
-                            page = if (selection == 0) QuizPage.Correct else QuizPage.Incorrect
+                        QuizButton(if (busy) "답변 처리 중…" else "정답 제출하기 (SUBMIT)",
+                            filled = true, enabled = selection != null && seconds > 0 && !busy) {
+                            selection?.let(onSubmit)
                         }
-                        QuizButton("×  다음에 풀기", filled = false, onClick = onFinish)
+                        QuizButton("⌃  보드 보기 (접기)", filled = false, onClick = onToggleCollapsed)
                     }
                     QuizPage.Correct -> {
+                        if (card.purchaseAvailable) {
                         Column(Modifier.fillMaxWidth().background(Color.White, Corners)
                             .border(2.dp, Ink, Corners).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
@@ -205,32 +205,36 @@ internal fun TileQuizPopup(
                             Row(Modifier.fillMaxWidth().background(Tint, Corners).padding(8.dp)) {
                                 Column(Modifier.weight(1f)) {
                                     Body("타일 인수 비용")
-                                    Text("${tile.price} G", color = Red, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                                    Text("${price} G", color = Red, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
                                     Body("보유 $balance G")
                                 }
                                 Column(Modifier.weight(1f)) {
-                                    Body("예상 통행료 수익")
-                                    Text("+${tile.price / 2} G / 턴당", color = Green, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                                    Body("방문 금액")
+                                    Text("${tile.price / 2}~${price} G", color = Green, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
                                 }
                             }
                             Body("인수하면 내 소유지가 되며, AI가 이 칸에 도착할 때 통행료가 입금됩니다.")
                             if (!canAcquire) Body("이미 소유자가 있는 타일입니다.")
-                            else if (gold < tile.price) Body("보유 코인이 부족합니다.")
-                            QuizButton("인수하기 (${tile.price} G 지불)", filled = true,
-                                enabled = canAcquire && gold >= tile.price, onClick = onAcquire)
-                            QuizButton("↪  건너뛰기 (패스)", filled = false, onClick = onFinish)
+                            else if (gold < price) Body("보유 코인이 부족합니다.")
+                            QuizButton("인수하기 (${price} G 지불)", filled = true,
+                                enabled = canAcquire && gold >= price && !busy, onClick = onAcquire)
+                            QuizButton("↪  건너뛰기 (패스)", filled = false, enabled = !busy, onClick = onFinish)
+                        }
+                        } else {
+                            card.settlementText?.let { Body(it) }
+                            QuizButton("→  확인하고 턴 넘기기", filled = true, enabled = !busy, onClick = onFinish)
                         }
                     }
                     QuizPage.Incorrect -> {
                         Column(Modifier.fillMaxWidth().background(Color.White, Corners)
                             .border(1.dp, Line, Corners).padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("💡 핵심 금융 해설", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
-                            Body(Explanation)
+                            Body(card.explanation.orEmpty())
                         }
                         Box(Modifier.fillMaxWidth().background(Tint, Corners).padding(8.dp)) {
-                            Body("이번 턴에는 ${tile.number}번 ${tile.title} 타일을 인수할 수 없으며, AI 뱅커에게 턴이 넘어갑니다.")
+                            Body(card.settlementText ?: "이번 퀴즈에서는 칸을 인수할 수 없습니다. 확인 후 차례를 마칩니다.")
                         }
-                        QuizButton("→  확인하고 턴 넘기기", filled = true, onClick = onFinish)
+                        QuizButton("→  확인하고 턴 넘기기", filled = true, enabled = !busy, onClick = onFinish)
                     }
                 }
             }
@@ -269,10 +273,10 @@ private fun QuizTicket(title: String, collapsed: Boolean = false, content: @Comp
 }
 
 @Composable
-internal fun AiQuizResultPopup(tile: QuizTile, correct: Boolean, onConfirm: () -> Unit) {
+internal fun AiQuizResultPopup(tile: QuizTile, correct: Boolean, onConfirm: () -> Unit, busy: Boolean = false, timedOut: Boolean = false) {
     val accent = if (correct) Green else Red
     val tint = if (correct) Color(0xFFDCFCE7) else Color(0xFFFFDEDA)
-    BackHandler(onBack = onConfirm)
+    BackHandler { if (!busy) onConfirm() }
     QuizTicket("AI 퀴즈 결과") {
         Column(
             Modifier.fillMaxWidth().background(Blue).padding(13.dp),
@@ -307,10 +311,10 @@ internal fun AiQuizResultPopup(tile: QuizTile, correct: Boolean, onConfirm: () -
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 QuizLabel(if (correct) "✓" else "×", Color.White, accent)
-                Text(if (correct) "AI 퀴즈 성공" else "AI 퀴즈 실패",
+                Text(if (timedOut) "AI 퀴즈 시간 초과" else if (correct) "AI 퀴즈 성공" else "AI 퀴즈 실패",
                     color = accent, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
             }
-            QuizButton("확인", filled = true, onClick = onConfirm)
+            QuizButton("확인", filled = true, enabled = !busy, onClick = onConfirm)
         }
     }
 }
@@ -374,7 +378,13 @@ private fun QuizBoardPreview(page: QuizPage) {
                     onToggleCollapsed = { collapsed = !collapsed },
                     onAcquire = {},
                     onFinish = {},
-                    initialPage = page,
+                    card = TileQuizUiState("preview", PreviewQuestion,
+                        PreviewAnswers.mapIndexed { index, text -> ServerChoice(index + 1, text) }, 1, page,
+                        hint = PreviewHint, selectedChoiceId = 1,
+                        correctChoiceId = if (page == QuizPage.Question) null else 1,
+                        explanation = if (page == QuizPage.Question) null else PreviewExplanation,
+                        purchaseAvailable = page == QuizPage.Correct),
+                    onSubmit = {},
                 )
             },
         )
@@ -411,17 +421,17 @@ private fun Barcode(modifier: Modifier) {
 }
 
 @Composable
-private fun AnswerRow(index: Int, selected: Boolean, onSelect: (() -> Unit)?, showCorrectLabel: Boolean = false) {
+private fun AnswerRow(choice: ServerChoice, selected: Boolean, onSelect: (() -> Unit)?, showCorrectLabel: Boolean = false) {
     val selectionModifier = if (onSelect == null) Modifier else
         Modifier.selectable(selected, role = Role.RadioButton, onClick = onSelect)
     Row(Modifier.fillMaxWidth().clip(Corners).background(if (selected) Color(0xFFEDF2FF) else Color.White)
         .border(1.dp, if (selected) Blue.copy(alpha = 0.55f) else Line, Corners)
         .then(selectionModifier).heightIn(min = if (onSelect == null) 40.dp else 44.dp).padding(horizontal = 9.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        QuizLabel(if (showCorrectLabel) "정답" else "${index + 1}",
+        QuizLabel(if (showCorrectLabel) "정답" else choice.id.toString(),
             if (selected) Color.White else Ink, if (selected) Blue else Line,
             if (showCorrectLabel) Modifier else Modifier.clip(CircleShape))
-        Text(Answers[index], Modifier.weight(1f), color = if (selected) Blue else Ink, fontSize = 13.sp,
+        Text(choice.text, Modifier.weight(1f), color = if (selected) Blue else Ink, fontSize = 13.sp,
             fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.Medium, lineHeight = 17.sp)
         Text(if (selected) "✓" else "○", color = if (selected) Blue else Line, fontSize = 16.sp, fontWeight = FontWeight.Bold)
     }

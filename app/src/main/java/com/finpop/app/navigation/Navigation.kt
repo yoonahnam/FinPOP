@@ -1,185 +1,67 @@
 package com.finpop.app.navigation
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.Crossfade
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import com.finpop.app.feature.auth.LoginScreen
-import com.finpop.app.feature.game.MainGameBoardScreen
-import com.finpop.app.feature.game.GameBoardUiState
-import com.finpop.app.feature.game.GameBoardPlayerId
-import com.finpop.app.feature.game.TilePurchaseUiEvent
-import com.finpop.app.feature.game.gameBoardDestination
-import com.finpop.app.feature.game.quizTile
-import com.finpop.app.feature.quiz.AiQuizResultPopup
-import com.finpop.app.feature.quiz.TileQuizPopup
-import kotlinx.coroutines.delay
-import kotlin.random.Random
-import com.finpop.app.ui.component.MainTab
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.finpop.app.data.auth.AuthRepository
 import com.finpop.app.data.user.UserRepository
 import com.finpop.app.feature.auth.LoginAction
+import com.finpop.app.feature.auth.LoginScreen
+import com.finpop.app.feature.game.GameSessionStore
+import com.finpop.app.feature.game.ServerGameBoardRoute
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
-/** Local guest entry only; server authentication is connected separately. */
+/** 최종 보드는 실제 로그인 세션과 서버 확정 상태를 사용합니다. */
 @Composable
-fun Navigation(
-    onMessage: (String) -> Unit,
-    // Temporary guest-game fallback until the team quiz resolver is wired in.
-    resolveAiQuiz: (tileId: Int) -> Boolean = { Random.nextBoolean() },
-) {
+fun Navigation(onMessage: (String) -> Unit, gameStore: GameSessionStore) {
     var showGameBoard by rememberSaveable { mutableStateOf(false) }
+    var loadingAction by remember { mutableStateOf<LoginAction?>(null) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
+    suspend fun openMyGame() {
+        val me = UserRepository.getMyProfile()
+        gameStore.bindUser(me.id)
+        gameStore.start(me.selectedCharacterId ?: "CHEESE")
+        showGameBoard = true
+    }
     BackHandler(enabled = showGameBoard) { showGameBoard = false }
-
-    Crossfade(targetState = showGameBoard, label = "Login to game board") { gameBoard ->
-        if (gameBoard) {
-            var boardState by remember { mutableStateOf(GameBoardUiState()) }
-            var diceValue by rememberSaveable { mutableIntStateOf(4) }
-            var isRolling by remember { mutableStateOf(false) }
-            var dicePlayerId by rememberSaveable { mutableStateOf(GameBoardPlayerId.P1) }
-            var activeQuizTileId by remember { mutableStateOf<Int?>(null) }
-            var quizCollapsed by remember { mutableStateOf(false) }
-            var aiQuizCorrect by remember { mutableStateOf<Boolean?>(null) }
-            val activeTile = activeQuizTileId?.let(::quizTile)
-            val aiTile = aiQuizCorrect?.let { quizTile(boardState.aiPosition) }
-            val hasPopup = activeTile != null || aiTile != null
-
-            fun finishAiTurn() {
-                aiQuizCorrect = null
-                boardState = boardState.copy(currentPlayerId = GameBoardPlayerId.P1)
-            }
-
-            fun finishPlayerTurn() {
-                activeQuizTileId = null
-                quizCollapsed = false
-                if (boardState.aiTurnsRemaining > 0) {
-                    boardState = boardState.copy(currentPlayerId = GameBoardPlayerId.P2)
-                    dicePlayerId = GameBoardPlayerId.P2
-                    isRolling = true
-                }
-            }
-
-            LaunchedEffect(isRolling, dicePlayerId) {
-                if (isRolling && dicePlayerId == GameBoardPlayerId.P1) {
-                    delay(900)
-                    diceValue = Random.nextInt(1, 7)
-                    val destination = gameBoardDestination(boardState.playerPosition, diceValue)
-                    boardState = boardState.copy(
-                        playerPosition = destination,
-                        playerTurnsRemaining = boardState.playerTurnsRemaining - 1,
-                    )
-                    isRolling = false
-                    activeQuizTileId = quizTile(destination)?.id
-                    if (activeQuizTileId == null) finishPlayerTurn()
-                } else if (isRolling) {
-                    delay(900)
-                    diceValue = Random.nextInt(1, 7)
-                    val destination = gameBoardDestination(boardState.aiPosition, diceValue)
-                    val toll = if (destination in boardState.playerOwnedTiles) {
-                        (quizTile(destination)?.price ?: 0) / 2
-                    } else 0
-                    val paid = toll.coerceAtMost(boardState.aiGold)
-                    boardState = boardState.copy(
-                        aiPosition = destination,
-                        aiTurnsRemaining = boardState.aiTurnsRemaining - 1,
-                        aiGold = boardState.aiGold - paid,
-                        playerGold = boardState.playerGold + paid,
-                    )
-                    isRolling = false
-                    if (quizTile(destination) == null) finishAiTurn()
-                    else aiQuizCorrect = resolveAiQuiz(destination)
-                }
-            }
-            MainGameBoardScreen(
-                state = boardState.copy(
-                    diceValue = diceValue, isRolling = isRolling, dicePlayerId = dicePlayerId,
-                    canRollDice = !hasPopup && boardState.canRollDice,
-                ),
-                onPurchaseAnimationFinished = { eventId ->
-                    boardState = boardState.purchaseAnimationFinished(eventId)
-                },
-                onMenuClick = { if (!hasPopup) onMessage("메뉴 연결 예정") },
-                onTabSelected = { tab ->
-                    if (!hasPopup && tab != MainTab.Board) onMessage("${tab.label} 화면 연결 예정")
-                },
-                onRollDice = { playerId ->
-                    if (!isRolling && !hasPopup && boardState.isPlayerTurn &&
-                        boardState.playerTurnsRemaining > 0 && playerId == GameBoardPlayerId.P1
-                    ) {
-                        dicePlayerId = playerId
-                        isRolling = true
-                    }
-                },
-                onTileClick = { onMessage("보드 칸 상세 화면 연결 예정") },
-                blurBoard = hasPopup && !quizCollapsed,
-                overlay = activeTile?.let { tile ->
-                    {
-                        val available = tile.id !in boardState.playerOwnedTiles && tile.id !in boardState.aiOwnedTiles
-                        TileQuizPopup(
-                            tile = tile,
-                            gold = boardState.playerGold,
-                            canAcquire = available,
-                            collapsed = quizCollapsed,
-                            onToggleCollapsed = { quizCollapsed = !quizCollapsed },
-                            onAcquire = {
-                                if (activeQuizTileId == tile.id && available && boardState.playerGold >= tile.price) {
-                                    boardState = boardState.copy(playerGold = boardState.playerGold - tile.price)
-                                        .withPurchase(TilePurchaseUiEvent(
-                                            "player-turn-${boardState.playerTurnsRemaining}", tile.id, GameBoardPlayerId.P1,
-                                        ))
-                                    finishPlayerTurn()
-                                }
-                            },
-                            onFinish = ::finishPlayerTurn,
-                        )
-                    }
-                } ?: aiTile?.let { tile ->
-                    val correct = aiQuizCorrect == true
-                    { AiQuizResultPopup(tile, correct, onConfirm = ::finishAiTurn) }
-                },
-            )
-        } else {
-            // 로그인 진행 상태 (로딩 중인 버튼, 에러 메시지)
-            val context = LocalContext.current
-            val scope = rememberCoroutineScope()
-            var loadingAction by remember { mutableStateOf<LoginAction?>(null) }
-            var errorMessage by remember { mutableStateOf<String?>(null) }
-
-            LoginScreen(
-                onGoogleLogin = {
+    if (showGameBoard) {
+        ServerGameBoardRoute(gameStore, onExit = { showGameBoard = false }, onMessage = onMessage)
+    } else {
+        LoginScreen(
+            onGoogleLogin = {
+                if (loadingAction == null) {
+                    loadingAction = LoginAction.Google
+                    errorMessage = null
                     scope.launch {
-                        loadingAction = LoginAction.Google
-                        errorMessage = null
+                        var authenticated = false
                         try {
                             AuthRepository.signInWithGoogle(context)
-                            val me = UserRepository.getMyProfile()
-                            onMessage("${me.nickname}님 환영해요! (Lv.${me.userLevel})")
-                            showGameBoard = true // 로그인 성공 → 메인 보드로 이동
-                        } catch (e: GetCredentialCancellationException) {
-                            // 사용자가 계정 선택 창을 닫음 → 아무것도 안 함
-                        } catch (e: Exception) {
-                            errorMessage = "로그인에 실패했어요: ${e.message}"
-                        } finally {
-                            loadingAction = null
-                        }
+                            authenticated = true
+                            openMyGame()
+                            onMessage("환영합니다!")
+                        } catch (_: GetCredentialCancellationException) {
+                            // Google 재인증 실패도 취소 예외로 전달될 수 있어 재시도 방법을 안내합니다.
+                            errorMessage = "Google 인증이 완료되지 않았습니다. 취소하지 않았다면 에뮬레이터 설정에서 Google 계정을 다시 인증한 뒤 시도해 주세요."
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) {
+                            errorMessage = if (authenticated)
+                                "Google 인증은 완료됐지만 사용자 정보를 불러오지 못했습니다. 연결 상태와 계정 DB 설정을 확인해 주세요."
+                            else "Google 인증을 완료하지 못했습니다. 연결 상태와 로그인 설정을 확인해 주세요."
+                        } finally { loadingAction = null }
                     }
-                },
-                onGuestLogin = { showGameBoard = true },
-                onTermsClick = { onMessage("이용약관 화면 연결 예정") },
-                onPrivacyClick = { onMessage("개인정보 처리방침 화면 연결 예정") },
-                loadingAction = loadingAction,
-                errorMessage = errorMessage,
-            )
-        }
+                }
+            },
+            onGuestLogin = { errorMessage = "실제 AI 대결은 Google 계정으로 로그인한 뒤 이용할 수 있습니다." },
+            onTermsClick = { onMessage("이용약관 화면 연결 예정") },
+            onPrivacyClick = { onMessage("개인정보 처리방침 화면 연결 예정") },
+            loadingAction = loadingAction,
+            errorMessage = errorMessage,
+        )
     }
 }

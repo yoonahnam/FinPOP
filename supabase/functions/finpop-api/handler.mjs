@@ -15,12 +15,12 @@ export function createHandler({url, publicKey, serviceKey, fetcher=fetch, uuid=(
       if(request.method==="GET" && pathname==="/v1/game-config") operation="config";
       else if(request.method==="POST" && pathname==="/v1/games") operation="create";
       else{
-        const match=pathname.match(/^\/v1\/games\/([^/]+)(?:\/(initiative|rolls|ai\/rolls|quiz-answers|quiz-timeouts|ai\/quiz-answers|purchases|ai\/purchases|turn-completions|ai\/turn-completions|island-skips|ai\/island-skips))?$/);
+        const match=pathname.match(/^\/v1\/games\/([^/]+)(?:\/(initiative|rolls|ai\/rolls|quiz-answers|quiz-timeouts|ai\/quiz-answers|purchases|ai\/purchases|turn-completions|ai\/turn-completions|island-skips|ai\/island-skips|pause|resume|abandon))?$/);
         if(!match) return error(404,"RESOURCE_NOT_FOUND","요청한 API를 찾을 수 없습니다.");
         gameId=match[1];
         if(!UUID.test(gameId)) return error(400,"INVALID_REQUEST","gameId는 UUID여야 합니다.");
         if(request.method==="GET" && !match[2]) operation="get";
-        else if(request.method==="POST" && match[2]) operation=({"initiative":"initiative","rolls":"roll","ai/rolls":"ai-roll","quiz-answers":"answer","quiz-timeouts":"quiz-timeout","ai/quiz-answers":"ai-answer","purchases":"purchase","ai/purchases":"ai-purchase","turn-completions":"complete-turn","ai/turn-completions":"ai-complete-turn","island-skips":"island-skip","ai/island-skips":"ai-island-skip"})[match[2]];
+        else if(request.method==="POST" && match[2]) operation=({"pause":"pause","resume":"resume","abandon":"abandon","initiative":"initiative","rolls":"roll","ai/rolls":"ai-roll","quiz-answers":"answer","quiz-timeouts":"quiz-timeout","ai/quiz-answers":"ai-answer","purchases":"purchase","ai/purchases":"ai-purchase","turn-completions":"complete-turn","ai/turn-completions":"ai-complete-turn","island-skips":"island-skip","ai/island-skips":"ai-island-skip"})[match[2]];
         else return error(405,"METHOD_NOT_ALLOWED","지원하지 않는 메서드입니다.");
       }
       const authorization=request.headers.get("Authorization");
@@ -102,4 +102,3 @@ export function createHandler({url, publicKey, serviceKey, fetcher=fetch, uuid=(
     }
   };
 }
-

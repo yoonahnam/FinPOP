@@ -1,3 +1,4 @@
+import {validateSessionControls} from './session-control-checks.mjs';
 process.on("uncaughtException",e=>{console.error(e.message,e.code??"",e.position);process.exit(1)});
 import { PGlite } from "@electric-sql/pglite";
 import {readFile,writeFile} from "node:fs/promises";
@@ -215,6 +216,7 @@ await validateAiMovement({db,test,rpc,fixedDice,ids});
 await validateQuizResolution({db,test,rpc,fixedDice,ids});
 await validateTurnActions({db,test,rpc,fixedDice,ids});
 await validateBasicImport({db,test});
+await validateSessionControls({db,test,rpc,fixedDice,ids});
 const report={engine:"PGlite 0.5.16",passed:results.filter(r=>r.passed).length,failed:results.filter(r=>!r.passed).length,results};
 await writeFile(new URL("./results.json",import.meta.url),JSON.stringify(report,null,2));
 console.log(JSON.stringify(report,null,2));

@@ -13,24 +13,19 @@ import androidx.compose.animation.core.tween
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
 import com.finpop.app.navigation.Navigation
+import androidx.lifecycle.ViewModelProvider
+import com.finpop.app.feature.game.GameSessionViewModel
 import com.finpop.app.feature.splash.SplashScreen
 
 class MainActivity : ComponentActivity() {
     private var showSplash by mutableStateOf(true)
-    private var splashSession by mutableIntStateOf(0)
 
-    override fun onRestart() {
-        super.onRestart()
-        splashSession++
-        showSplash = true
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val gameModel = ViewModelProvider(this)[GameSessionViewModel::class.java]
         setContent {
             MaterialTheme(
                 colorScheme = lightColorScheme(
@@ -43,11 +38,9 @@ class MainActivity : ComponentActivity() {
             ) {
                 Crossfade(targetState = showSplash, animationSpec = tween(350), label = "Splash to login") { splash ->
                     if (splash) {
-                        key(splashSession) {
-                            SplashScreen(onEnter = { showSplash = false })
-                        }
+                        SplashScreen(onEnter = { showSplash = false })
                     } else {
-                        Navigation(onMessage = ::showMessage)
+                        Navigation(onMessage = ::showMessage, gameStore = gameModel.store)
                     }
                 }
             }

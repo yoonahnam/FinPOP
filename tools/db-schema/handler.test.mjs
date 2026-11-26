@@ -155,3 +155,15 @@ test("구매 금액·AI 선택·턴 ID 위조 차단",async()=>{
   assert.equal(f.calls.length,0);
  }
 });
+
+for (const operation of ['pause','resume','abandon']) {
+ test(operation+' 세션 명령은 인증된 RPC에 버전·요청 키를 전달',async()=>{
+  const f=fixture();const r=await f.handler(request('/v1/games/'+gid+'/'+operation,{expectedVersion:4}));
+  assert.equal(r.status,200);const rpc=JSON.parse(f.calls[1].options.body);
+  assert.equal(rpc.p_operation,operation);assert.equal(rpc.p_game_id,gid);assert.equal(rpc.p_body.expectedVersion,4);assert.equal(rpc.p_request_key,key);
+ });
+ test(operation+' 클라이언트 시간·보상 주입 차단',async()=>{
+  const f=fixture();const r=await f.handler(request('/v1/games/'+gid+'/'+operation,{expectedVersion:4,remainingQuizMs:20000,rewardGranted:true}));
+  assert.equal(r.status,400);assert.equal(f.calls.length,0);
+ });
+}
